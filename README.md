@@ -25,7 +25,7 @@ My-ChatBot 旨在提供一套簡單易用且可擴充的聊天機器人框架，
    pip install -r requirements.txt
    ```
 
-3. 設定 Google Gemini API 金鑰（請參考官方文件申請並設定環境變數或 config 檔案）。
+3. 設定 Google Gemini API 金鑰（請參考官方文件申請並設定環境變數、config 檔案或.env檔案 格式請參閱.env example）。
 
 ## 使用說明
 
@@ -40,11 +40,3 @@ My-ChatBot 旨在提供一套簡單易用且可擴充的聊天機器人框架，
 
 - main.py：主程式入口
 - 其他檔案依各語言功能細分（如 C、Cython、JavaScript 等）
-
-## 貢獻方式
-
-歡迎提出 Issue 或 Pull Request，一起讓本專案更完善！
-
-## 聯絡方式
-
-如有任何問題，請聯絡 Joy0130。
