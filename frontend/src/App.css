@@ -1,0 +1,145 @@
+/* .App {
+  text-align: center;
+}
+
+.App-logo {
+  height: 40vmin;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 20s linear;
+  }
+}
+
+.App-header {
+  background-color: #282c34;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: white;
+}
+
+.App-link {
+  color: #61dafb;
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+} */
+
+
+/* React App 特定樣式 */
+.App {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 訊息容器優化 */
+.messages-container {
+  scroll-behavior: smooth;
+}
+
+/* 輸入框增強樣式 */
+.message-input {
+  resize: none;
+  min-height: 44px;
+  max-height: 120px;
+}
+
+.message-input:focus {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* 按鈕組樣式 */
+.button-group {
+  display: flex;
+  gap: 8px;
+}
+
+.button-group button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 文件拖放區域 */
+.file-drop-zone {
+  border: 2px dashed #e2e8f0;
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  transition: all 0.3s ease;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.file-drop-zone:hover {
+  border-color: #3b82f6;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+}
+
+.file-drop-zone.drag-over {
+  border-color: #093fd5;
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  transform: scale(1.02);
+}
+
+/* 響應式改進 */
+@media (max-width: 640px) {
+  .message-bubble {
+    max-width: 85vw;
+  }
+  
+  .button-group {
+    gap: 4px;
+  }
+  
+  .button-group button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  
+  .chat-input-area {
+    padding: 12px;
+  }
+  
+  .welcome-message {
+    padding: 16px;
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-bubble {
+    max-width: 90vw;
+    font-size: 14px;
+  }
+  
+  .chat-header h1 {
+    font-size: 18px;
+  }
+  
+  .chat-header p {
+    font-size: 12px;
+  }
+}
+
+/* 載入狀態改進 */
+
+/* 隱藏滾動條 */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* 對於 Chrome, Safari 和 Opera */
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;  /* 對於 IE 和 Edge */
+  scrollbar-width: none;  /* 對於 Firefox */
+}
