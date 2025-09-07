@@ -29,9 +29,13 @@ My-ChatBot 旨在提供一套簡單易用且可擴充的聊天機器人框架，
 
 ## 使用說明
 
-1. 啟動主程式（假設入口為 main.py）：
+1. 啟動前端主程式（進入到frontend）：
    ```bash
-   python main.py
+   npm start
+   ```
+2. 啟動後端主程式（進入到backend入口為 app.py）：
+   ```bash
+   python app.py
    ```
 
 2. 依指示輸入訊息，即可開始與聊天機器人互動。
