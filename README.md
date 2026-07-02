@@ -22,7 +22,7 @@ My-ChatBot 旨在提供一套簡單易用且可擴充的聊天機器人框架，
 
 2. 安裝必要套件（請根據實際 requirements.txt 補充）：
    ```bash
-   pip install -r requirements.txt
+   pip install -r backend/requirements.txt
    ```
 
 3. 設定 Google Gemini API 金鑰（請參考官方文件申請並設定環境變數、config 檔案或.env檔案 格式請參閱.env example）。
@@ -31,9 +31,16 @@ My-ChatBot 旨在提供一套簡單易用且可擴充的聊天機器人框架，
 
 1. 啟動前端主程式（進入到frontend）：
    ```bash
-   npm start
+   cd frontend
+   npm install
+   npm run
    ```
-2. 啟動後端主程式（進入到backend入口為 app.py）：
+2. 啟動後端主程式（進入到backend 入口為 app.py）：
+
+   ```bash
+   cd backend
+   ```
+
    ```bash
    python app.py
    ```

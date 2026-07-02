@@ -35,7 +35,7 @@ for m in genai.list_models():
 # --- 修正 #2: 使用有效的 Gemini 模型名稱 ---
 system_instruction = "你是一個樂於助人、專業且友善的 AI 助理。請以詳盡且有條理的方式，使用繁體中文來回答所有問題。"
 model = genai.GenerativeModel(
-    'gemini-2.5-pro', # 使用一個有效的模型名稱
+    'gemini-3.1-flash-lite', # 使用一個有效的模型名稱
     system_instruction=system_instruction
 )
 
