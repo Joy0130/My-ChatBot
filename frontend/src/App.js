@@ -1,7 +1,7 @@
 // --- 1. 依賴導入 ---
 // 引入 React 核心功能 (hooks) 和第三方庫 (lucide-react 圖示庫, react-syntax-highlighter 程式碼高亮)
-import React, { useState, useRef, useEffect, useCallback, createContext, useContext } from 'react';
-import { Send, Upload, Trash2, FileText, User, Bot, AlertCircle, CheckCircle, Info, Copy, Check, Sun, Moon } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from 'react';
+import { Send, Upload, Trash2, FileText, User, Bot, AlertCircle, CheckCircle, Info, Copy, Check, Sun, Moon, Plus, MessageSquare, X } from 'lucide-react';
 import './App.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -22,6 +22,43 @@ const formatTime = () => {
     hour: '2-digit',
     minute: '2-digit'
   });
+};
+
+/**
+ * 工具函數：產生一個簡單的唯一 ID (用於對話與訊息)。
+ */
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+// 新對話的預設歡迎訊息。
+const WELCOME_TEXT = '您好！我是您的專屬助理，有什麼可以為您服務的嗎？您可以直接問我問題，或是上傳文件讓我為您分析。';
+
+/**
+ * 工具函數：建立一個全新的對話物件。
+ * @param {string} [title] - 對話標題，預設為「新對話」。
+ */
+const makeConversation = (title = '新對話') => ({
+  id: genId(),
+  title,
+  model: '', // 空字串代表沿用目前的預設模型
+  messages: [{ id: genId(), text: WELCOME_TEXT, sender: 'bot', timestamp: formatTime() }],
+});
+
+/**
+ * 工具函數：嘗試將對話清單寫入 localStorage。
+ * localStorage 通常有約 5MB 容量上限；若對話過多 / 內容過長導致超出配額，
+ * 會拋出例外——這裡以 try/catch 攔截，回傳是否寫入成功 (不讓應用崩潰)。
+ * 寫入失敗時，對話仍保留在記憶體中，由畫面提示使用者刪除舊對話以釋放空間。
+ * @returns {boolean} 是否成功寫入。
+ */
+const trySaveConversations = (conversations, activeId) => {
+  try {
+    localStorage.setItem('conversations', JSON.stringify(conversations));
+    localStorage.setItem('activeConversationId', activeId);
+    return true;
+  } catch (e) {
+    console.warn('localStorage 容量不足，無法保存對話歷史。', e);
+    return false;
+  }
 };
 
 // --- 3. 主題管理 (Context API) ---
@@ -177,14 +214,32 @@ const MessageContent = ({ text }) => {
  */
 const ChatBot = () => {
   // --- 狀態管理 (State Management) ---
-  const [messages, setMessages] = useState([]);
+  // 多對話：conversations 為所有對話的清單，activeId 為目前顯示的對話。
+  const [conversations, setConversations] = useState([]);
+  const [activeId, setActiveId] = useState(null);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
-  const [showHistory, setShowHistory] = useState(false);
+  // 可選用的模型清單，以及預設模型
+  const [availableModels, setAvailableModels] = useState([]);
+  const [defaultModel, setDefaultModel] = useState('');
+  // 當 localStorage 容量不足、無法保存對話時，顯示提示橫幅。
+  const [storageFull, setStorageFull] = useState(false);
   // 從 Context 中取得主題狀態和切換函數。
   const { theme, toggleTheme } = useContext(ThemeContext);
+
+  // --- 衍生狀態 (Derived State) ---
+  // 目前作用中的對話，以及其訊息與模型。
+  const activeConversation = useMemo(
+    () => conversations.find((c) => c.id === activeId) || null,
+    [conversations, activeId]
+  );
+  const messages = useMemo(
+    () => (activeConversation ? activeConversation.messages : []),
+    [activeConversation]
+  );
+  const selectedModel = (activeConversation && activeConversation.model) || defaultModel;
 
   // --- DOM 引用 (Refs) ---
   const fileInputRef = useRef(null);
@@ -205,41 +260,112 @@ const ChatBot = () => {
   }, [inputMessage]);
 
   /**
-   * Callback: 新增一條訊息到訊息列表中。
+   * Callback: 將一條訊息新增到「指定對話」的訊息列表中。
+   * @param {string} convId - 目標對話的 id。
    * @param {object} message - 要新增的訊息物件。
    */
-  const addMessage = useCallback((message) => {
-    setMessages(prev => [...prev, {
-      ...message,
-      id: Date.now() + Math.random(),
-      timestamp: formatTime()
-    }]);
+  const addMessageToConversation = useCallback((convId, message) => {
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === convId
+          ? {
+              ...c,
+              messages: [
+                ...c.messages,
+                { ...message, id: genId(), timestamp: formatTime() },
+              ],
+            }
+          : c
+      )
+    );
+  }, []);
+
+  /**
+   * Callback: 將一條訊息新增到「目前作用中」的對話。
+   * @param {object} message - 要新增的訊息物件。
+   */
+  const addMessage = useCallback(
+    (message) => {
+      if (activeId) addMessageToConversation(activeId, message);
+    },
+    [activeId, addMessageToConversation]
+  );
+
+  /**
+   * Callback: 建立一個新對話並切換過去。
+   */
+  const createNewConversation = useCallback(() => {
+    const conv = makeConversation();
+    setConversations((prev) => [conv, ...prev]);
+    setActiveId(conv.id);
+    setInputMessage('');
+    setSelectedFile(null);
+  }, []);
+
+  /**
+   * Callback: 切換到指定的對話。
+   */
+  const switchConversation = useCallback((id) => {
+    setActiveId(id);
+    setInputMessage('');
+    setSelectedFile(null);
   }, []);
 
   /**
    * Effect Hook: 組件初次渲染時執行。
-   * 嘗試從 localStorage 載入聊天歷史，如果沒有歷史，則顯示一條歡迎訊息。
+   * 從 localStorage 載入多對話資料；若無則 (嘗試沿用舊版單一對話) 或建立一個新對話。
    */
   useEffect(() => {
-    const savedHistory = localStorage.getItem('chatHistory');
-    const history = savedHistory ? JSON.parse(savedHistory) : [];
-    
-    if (history.length > 0) {
-      setMessages(history);
-    } else {
-      // 使用 setTimeout 讓歡迎訊息延遲出現，提升使用者體驗。
-      const timer = setTimeout(() => addMessage({ text: '您好！我是您的專屬助理，有什麼可以為您服務的嗎？您可以直接問我問題，或是上傳文件讓我為您分析。', sender: 'bot' }), 500);
-      return () => clearTimeout(timer);
+    let loaded = [];
+    let loadedActiveId = null;
+    try {
+      const savedConvos = localStorage.getItem('conversations');
+      if (savedConvos) {
+        loaded = JSON.parse(savedConvos) || [];
+        loadedActiveId = localStorage.getItem('activeConversationId');
+      } else {
+        // 向下相容：把舊版單一對話 (chatHistory) 轉為一個對話。
+        const oldHistory = localStorage.getItem('chatHistory');
+        const parsed = oldHistory ? JSON.parse(oldHistory) : [];
+        if (parsed.length > 0) {
+          const conv = makeConversation('先前的對話');
+          conv.messages = parsed;
+          loaded = [conv];
+        }
+      }
+    } catch (e) {
+      console.error('載入對話資料失敗:', e);
     }
-  }, [addMessage]);
+
+    if (!loaded || loaded.length === 0) {
+      loaded = [makeConversation()];
+    }
+    // 清理先前版本殘留的「無法連接到後端」系統錯誤訊息 (現已不再寫入對話)，避免過時訊息造成誤解。
+    loaded = loaded.map((c) => ({
+      ...c,
+      messages: (c.messages || []).filter(
+        (m) => !(m.isError && typeof m.text === 'string' && m.text.includes('無法連接到後端服務'))
+      ),
+    }));
+    // 確認 activeId 有效，否則採用第一個對話。
+    if (!loadedActiveId || !loaded.some((c) => c.id === loadedActiveId)) {
+      loadedActiveId = loaded[0].id;
+    }
+    setConversations(loaded);
+    setActiveId(loadedActiveId);
+  }, []);
 
   /**
-   * Effect Hook: 當訊息列表 (messages) 發生變化時執行。
-   * 將最新的訊息列表儲存到 localStorage。
+   * Effect Hook: 當對話清單或作用中對話變化時，儲存到 localStorage。
    */
   useEffect(() => {
-    localStorage.setItem('chatHistory', JSON.stringify(messages));
-  }, [messages]);
+    // activeId 尚未初始化 (null) 時不覆寫，避免把初始空狀態寫入。
+    if (activeId === null) return;
+    const ok = trySaveConversations(conversations, activeId);
+    // 寫入失敗代表容量不足：顯示提示橫幅，讓使用者自行刪除舊對話釋放空間。
+    // 成功則清除提示 (例如使用者刪除舊對話後空間已足夠)。
+    setStorageFull(!ok);
+  }, [conversations, activeId]);
 
   /**
    * Callback: 將聊天視窗平滑地滾動到最底部。
@@ -253,33 +379,56 @@ const ChatBot = () => {
   }, []);
 
   /**
-   * Effect Hook: 執行後端健康檢查。
-   * 組件掛載時，會向後端發送請求，以確認後端服務是否正常運行。
+   * Effect Hook: 執行後端健康檢查 (定期輪詢)。
+   * 連線狀態只反映在標題列，不寫入對話訊息中，避免留下過時的錯誤訊息造成誤解。
+   * 每 5 秒重新檢查一次，後端恢復後畫面會自動變回「已連接」。
    */
   useEffect(() => {
+    let cancelled = false;
+
     const checkConnection = async () => {
       try {
         // 向後端的 /health 端點發送請求。
         const response = await fetch(`${API_BASE}/health`, {
           credentials: 'include' // 確保請求中包含 cookie，以便 session 正常工作。
         });
-        if (response.ok) {
-          setConnectionStatus('connected');
-        } else {
-          setConnectionStatus('error');
-        }
+        if (!cancelled) setConnectionStatus(response.ok ? 'connected' : 'error');
       } catch (error) {
-        setConnectionStatus('error');
-        addMessage({
-          text: '⚠️ 無法連接到後端服務，請確保後端正在運行於 http://localhost:5002',
-          sender: 'system',
-          isError: true
-        });
+        if (!cancelled) setConnectionStatus('error');
       }
     };
 
     checkConnection();
-  }, [addMessage]);
+    const intervalId = setInterval(checkConnection, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, []);
+
+  /**
+   * Effect Hook: 載入後端提供的可用模型清單。
+   * 組件掛載時向 /models 端點請求，取得模型清單與目前使用中的模型。
+   */
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/models`, {
+          credentials: 'include'
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setAvailableModels(data.models || []);
+          // 記錄預設模型；未指定模型的對話會沿用此預設值。
+          setDefaultModel(data.default || (data.models && data.models[0]) || '');
+        }
+      } catch (error) {
+        console.error('載入模型清單失敗:', error);
+      }
+    };
+
+    fetchModels();
+  }, []);
 
   /**
    * Effect Hook: 當訊息列表更新時，自動滾動到底部。
@@ -305,6 +454,9 @@ const ChatBot = () => {
 
     const userMessage = inputMessage.trim();
     const userFile = selectedFile;
+    // 記住這則訊息屬於哪個對話，避免傳送過程中切換對話導致回應寫錯地方。
+    const convId = activeId;
+    const modelForRequest = selectedModel;
 
     // 清空輸入框和已選文件。
     setInputMessage('');
@@ -316,11 +468,20 @@ const ChatBot = () => {
     setIsLoading(true);
 
     // 將使用者發送的訊息立即顯示在畫面上。
-    addMessage({ 
-      text: userFile ? `${userMessage} (文件: ${userFile.name})` : userMessage, 
+    addMessageToConversation(convId, {
+      text: userFile ? `${userMessage} (文件: ${userFile.name})` : userMessage,
       sender: 'user',
       isFile: !!userFile,
     });
+
+    // 若這是該對話的第一則使用者訊息，用它作為對話標題。
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === convId && (c.title === '新對話' || !c.title)
+          ? { ...c, title: userMessage.slice(0, 20) }
+          : c
+      )
+    );
 
     try {
       let response;
@@ -329,6 +490,8 @@ const ChatBot = () => {
         const formData = new FormData();
         formData.append('file', userFile);
         formData.append('message', userMessage);
+        if (modelForRequest) formData.append('model', modelForRequest);
+        formData.append('conversation_id', convId);
         response = await fetch(`${API_BASE}/chat`, {
           method: 'POST',
           body: formData,
@@ -339,7 +502,7 @@ const ChatBot = () => {
         response = await fetch(`${API_BASE}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: userMessage }),
+          body: JSON.stringify({ message: userMessage, model: modelForRequest, conversation_id: convId }),
           credentials: 'include',
         });
       }
@@ -349,15 +512,21 @@ const ChatBot = () => {
       });
 
       if (response.ok) {
-        // 如果請求成功，將機器人的回應新增到訊息列表。
-        addMessage({ text: data.response, sender: 'bot' });
+        // 如果請求成功，將機器人的回應新增到該對話。
+        addMessageToConversation(convId, { text: data.response, sender: 'bot' });
+        // 以後端實際使用的模型同步該對話的模型 (例如指定的模型無效時後端會退回預設)。
+        if (data.model) {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === convId ? { ...c, model: data.model } : c))
+          );
+        }
       } else {
         throw new Error(data.error || '發送訊息失敗');
       }
     } catch (error) {
       console.error('發送訊息錯誤:', error);
       // 如果發生錯誤，顯示一條錯誤訊息。
-      addMessage({ text: `錯誤: ${error.message}`, sender: 'bot', isError: true });
+      addMessageToConversation(convId, { text: `錯誤: ${error.message}`, sender: 'bot', isError: true });
     } finally {
       setIsLoading(false);
     }
@@ -396,27 +565,98 @@ const ChatBot = () => {
   };
 
   /**
-   * 異步函數: 清除本地和後端的對話歷史。
+   * 異步函數: 清除「目前對話」的歷史 (本地與後端)。
    */
   const clearHistory = async () => {
+    if (!activeId) return;
     // 彈出確認對話框，防止誤觸。
-    if (!window.confirm('確定要清除所有對話歷史嗎？')) return;
+    if (!window.confirm('確定要清除這個對話的歷史嗎？')) return;
 
     try {
-      // 向後端發送清除請求。
-      const response = await fetch(`${API_BASE}/clear`, { 
+      // 向後端發送清除請求 (帶上 conversation_id)。
+      await fetch(`${API_BASE}/clear`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: activeId }),
         credentials: 'include'
       });
-      if (response.ok) {
-        setMessages([]);
-        localStorage.removeItem('chatHistory');
-        addMessage({ text: '✅ 對話歷史已清除', sender: 'system' });
-      }
     } catch (error) {
       console.error('清除歷史失敗:', error);
-      addMessage({ text: '❌ 清除歷史失敗', sender: 'system', isError: true });
     }
+    // 將目前對話的訊息重置為只剩一則系統提示。
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === activeId
+          ? { ...c, messages: [{ id: genId(), text: '✅ 對話歷史已清除', sender: 'system', timestamp: formatTime() }] }
+          : c
+      )
+    );
+  };
+
+  /**
+   * 異步函數: 刪除一個對話 (含後端歷史)。
+   */
+  const deleteConversation = async (id) => {
+    if (!window.confirm('確定要刪除這個對話嗎？此動作無法復原。')) return;
+
+    try {
+      await fetch(`${API_BASE}/clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: id }),
+        credentials: 'include'
+      });
+    } catch (error) {
+      console.error('刪除對話失敗:', error);
+    }
+
+    setConversations((prev) => {
+      const remaining = prev.filter((c) => c.id !== id);
+      // 若刪除的是目前對話，切換到剩下的第一個；若已無對話則建立新的。
+      if (id === activeId) {
+        if (remaining.length > 0) {
+          setActiveId(remaining[0].id);
+        } else {
+          const fresh = makeConversation();
+          setActiveId(fresh.id);
+          return [fresh];
+        }
+      }
+      return remaining;
+    });
+  };
+
+  /**
+   * 事件處理器: 刪除最舊、且非目前使用中的一個對話，用於容量不足時釋放空間。
+   */
+  const deleteOldestConversation = async () => {
+    // 陣列尾端為最舊；找出第一個非使用中的對話。
+    const target = [...conversations].reverse().find((c) => c.id !== activeId);
+    if (!target) {
+      window.alert('目前只剩一個對話，無法再刪除。請改用「清除對話」縮短內容。');
+      return;
+    }
+    try {
+      await fetch(`${API_BASE}/clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: target.id }),
+        credentials: 'include'
+      });
+    } catch (error) {
+      console.error('刪除對話失敗:', error);
+    }
+    setConversations((prev) => prev.filter((c) => c.id !== target.id));
+  };
+
+  /**
+   * 事件處理器: 變更目前對話所使用的模型。
+   */
+  const handleModelChange = (model) => {
+    if (!activeId) return;
+    setConversations((prev) =>
+      prev.map((c) => (c.id === activeId ? { ...c, model } : c))
+    );
   };
 
   /**
@@ -449,8 +689,52 @@ const ChatBot = () => {
 
   return (
     // --- JSX 渲染 ---
-    <div className="flex flex-col h-screen bg-slate-50 relative dark:bg-slate-900">
-      
+    <div className="flex h-screen bg-slate-50 dark:bg-slate-900">
+
+      {/* 對話側邊欄 (多對話清單) */}
+      <div className="w-64 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col dark:bg-slate-800 dark:border-slate-700">
+        {/* 新增對話按鈕 */}
+        <div className="p-3 border-b border-slate-200 dark:border-slate-700">
+          <button
+            onClick={createNewConversation}
+            className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            <Plus size={18} />
+            <span>新增對話</span>
+          </button>
+        </div>
+        {/* 對話清單 */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {conversations.map((conv) => (
+            <div
+              key={conv.id}
+              onClick={() => switchConversation(conv.id)}
+              className={`group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                conv.id === activeId
+                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+              title={conv.title}
+            >
+              <div className="flex items-center space-x-2 min-w-0">
+                <MessageSquare size={16} className="flex-shrink-0" />
+                <span className="truncate text-sm">{conv.title || '新對話'}</span>
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}
+                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-100 hover:text-red-600 transition-all dark:hover:bg-red-900/40"
+                title="刪除對話"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 主要區域 (標題欄 + 訊息 + 輸入) */}
+      <div className="flex flex-col flex-1 relative min-w-0">
+
       {/* 標題欄 */}
       <div className="bg-white shadow-lg border-b p-4 flex justify-between items-center dark:bg-gray-800 dark:border-gray-700">
         <div className="flex items-center space-x-3">
@@ -461,11 +745,39 @@ const ChatBot = () => {
             <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">My ChatBot</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               連接狀態: {connectionStatus === 'connected' ? '✅ 已連接' : connectionStatus === 'connecting' ? '🔄 連接中...' : '❌ 連接失敗'}
+              {selectedModel && <span className="ml-2">• 目前模型: <strong className="text-slate-700 dark:text-slate-200">{selectedModel}</strong></span>}
             </p>
           </div>
         </div>
         
-        <div className="flex space-x-2">
+        <div className="flex items-center space-x-2">
+          {/* 模型選擇下拉選單 */}
+          {availableModels.length > 0 && (
+            <select
+              value={selectedModel}
+              onChange={(e) => handleModelChange(e.target.value)}
+              title="選擇要使用的模型"
+              className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg border border-slate-200 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors cursor-pointer dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600"
+            >
+              {/* Gemini 雲端模型 */}
+              {availableModels.filter((m) => !m.startsWith('ollama:')).length > 0 && (
+                <optgroup label="Gemini (雲端)">
+                  {availableModels.filter((m) => !m.startsWith('ollama:')).map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </optgroup>
+              )}
+              {/* Ollama 本機模型 */}
+              {availableModels.filter((m) => m.startsWith('ollama:')).length > 0 && (
+                <optgroup label="Ollama (本機)">
+                  {availableModels.filter((m) => m.startsWith('ollama:')).map((m) => (
+                    <option key={m} value={m}>{m.replace('ollama:', '')}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          )}
+
           {/* 主題切換按鈕 */}
           <button
             onClick={toggleTheme}
@@ -475,16 +787,7 @@ const ChatBot = () => {
             {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
           </button>
 
-          {/* 查看歷史紀錄按鈕 */}
-          <button
-            onClick={() => setShowHistory(true)}
-            className="flex items-center space-x-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-all duration-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
-          >
-            <Info size={16} />
-            <span className="hidden sm:inline">歷史紀錄</span>
-          </button>
-
-                   {/* 清除對話歷史 */}
+          {/* 清除目前對話歷史 */}
           <button
             onClick={clearHistory}
             className="flex items-center space-x-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200 dark:bg-red-600 dark:hover:bg-red-500"
@@ -494,6 +797,23 @@ const ChatBot = () => {
           </button>
         </div>
       </div>
+
+      {/* 儲存空間不足提示橫幅 */}
+      {storageFull && (
+        <div className="bg-amber-100 border-b border-amber-300 px-4 py-3 flex items-center justify-between gap-3 dark:bg-amber-900/30 dark:border-amber-800/50">
+          <div className="flex items-center space-x-2 text-sm text-amber-800 dark:text-amber-200 min-w-0">
+            <AlertCircle size={18} className="flex-shrink-0" />
+            <span>瀏覽器儲存空間已滿，新的對話可能無法保存。請刪除一些舊對話以釋放空間。</span>
+          </div>
+          <button
+            onClick={deleteOldestConversation}
+            className="flex-shrink-0 flex items-center space-x-1 px-3 py-1.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors text-sm"
+          >
+            <Trash2 size={14} />
+            <span>刪除最舊對話</span>
+          </button>
+        </div>
+      )}
 
       {/* 訊息顯示區域 */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ paddingBottom: '20px' }}>
@@ -527,36 +847,6 @@ const ChatBot = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {showHistory && (
-        // 歷史紀錄側邊欄
-        <div className="absolute top-0 right-0 w-80 h-full bg-white shadow-lg border-l z-50 flex flex-col dark:bg-slate-800 dark:border-slate-700">
-          <div className="p-4 flex justify-between items-center border-b dark:border-slate-700">
-            <h2 className="font-bold text-slate-700 dark:text-slate-200">對話歷史</h2>
-            <button onClick={() => setShowHistory(false)} className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white">關閉</button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-2 ">
-            {messages.length === 0 ? (
-              <p className="text-sm text-slate-500 dark:text-slate-400">目前沒有歷史訊息。</p>
-            ) : (
-              messages.map(msg => (
-                <div key={msg.id} className="border-b border-slate-200 pb-2 dark:border-slate-600">
-                  <div className="text-xs text-slate-400 dark:text-slate-500">{msg.timestamp} • {msg.sender}</div>
-                  <div className="text-sm dark:text-slate-300">{msg.text}</div>
-                </div>
-              ))
-            )}
-          </div>
-          <div className="p-4 border-t dark:border-slate-700">
-            <button
-              onClick={clearHistory}
-              className="w-full px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200"
-            >
-              清除歷史
-            </button>
-          </div>
-        </div>
-      )}
-      
       {selectedFile && !isLoading && (
         // 已選擇文件的提示欄
         <div className="bg-blue-100 border-t border-blue-200 p-2 px-4 flex items-center justify-between animate-fade-in-fast dark:bg-blue-900/30 dark:border-blue-800/50">
@@ -608,6 +898,7 @@ const ChatBot = () => {
         <div className="mt-2 text-xs text-slate-500 text-center dark:text-slate-400">
           {selectedFile ? `將連同文件「${selectedFile.name}」一併發送` : '按 Enter 發送 • 按 Shift + Enter 換行 • 支援 TXT, PDF, DOCX 文件上傳'}
         </div>
+      </div>
       </div>
     </div>
   );
