@@ -137,6 +137,11 @@ def call_gemini(model_name, history, user_message):
 # 上傳較長文件時，文件內容會因超出上下文而被截斷 (從開頭捨棄)，
 # 導致模型「看不到」文件。這裡調高 num_ctx；可用環境變數覆寫。
 OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+# 本機模型在一般電腦上可能很慢，等待上限預設 300 秒；可用環境變數覆寫。
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+# 會「先思考再回答」的模型 (例如 gemma4、qwen3) 思考過程很長，容易逾時。
+# 預設關閉思考，讓模型直接回答；設為 true 可重新開啟。
+OLLAMA_THINK = os.getenv("OLLAMA_THINK", "false").lower() == "true"
 
 def call_ollama(model_name, history, user_message):
     """以 Ollama 模型產生回應。model_name 含 "ollama:" 前綴。"""
@@ -144,16 +149,18 @@ def call_ollama(model_name, history, user_message):
     messages = [{"role": "system", "content": system_instruction}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_message})
-    resp = requests.post(
-        f"{OLLAMA_BASE}/api/chat",
-        json={
-            "model": real_name,
-            "messages": messages,
-            "stream": False,
-            "options": {"num_ctx": OLLAMA_NUM_CTX},
-        },
-        timeout=120,
-    )
+    payload = {
+        "model": real_name,
+        "messages": messages,
+        "stream": False,
+        "think": OLLAMA_THINK,
+        "options": {"num_ctx": OLLAMA_NUM_CTX},
+    }
+    resp = requests.post(f"{OLLAMA_BASE}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
+    # 不支援思考開關的舊模型可能回 400，此時拿掉 think 參數再試一次。
+    if resp.status_code == 400 and "think" in resp.text.lower():
+        payload.pop("think")
+        resp = requests.post(f"{OLLAMA_BASE}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
     resp.raise_for_status()
     return resp.json().get("message", {}).get("content", "").strip() or \
         "模型沒有回傳任何內容，請再試一次。"
