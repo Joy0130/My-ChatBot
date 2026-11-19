@@ -41,9 +41,9 @@ Python Flask 後端
 | Python 3.9+、Flask | 提供聊天、模型清單、健康檢查及清除對話等 API。主要程式位於 `backend/app.py`。 |
 | Flask-CORS | 設定瀏覽器前端跨來源呼叫後端。目前設定允許 `http://localhost:3000`。 |
 | python-dotenv | 從 `backend/.env` 載入 Gemini API 金鑰及其他環境設定。 |
-| google-generativeai | 使用 Google Gemini Python SDK 呼叫雲端模型。 |
+| google-genai | 使用 Google Gen AI Python SDK 呼叫 Gemini 雲端模型。 |
 | requests | 呼叫本機 Ollama HTTP API。 |
-| PyMuPDF（fitz）、PyPDF2 | 擷取 PDF 文字。程式優先使用 PyMuPDF；若擷取失敗或結果為空，則退回 PyPDF2。 |
+| PyMuPDF（fitz）、pypdf | 擷取 PDF 文字。程式優先使用 PyMuPDF；若擷取失敗或結果為空，則退回 pypdf。 |
 | python-docx | 擷取 DOCX 文件中的段落文字。 |
 | Werkzeug、tempfile | 安全地處理上傳檔案名稱與暫存檔案。上傳內容會經過類型檢查，暫存檔在處理後清除。 |
 
@@ -215,7 +215,7 @@ npm start
 - 以檔案開頭的內容（magic bytes）檢查實際格式，不只信任副檔名。
 - 使用隨機命名的暫存檔，不使用使用者提供的檔名作為磁碟路徑。
 - 以 `try/finally` 清除處理完成的暫存檔。
-- PDF 優先使用 PyMuPDF 擷取文字，必要時退回 PyPDF2。掃描圖片且沒有文字層的 PDF 不會自動 OCR。
+- PDF 優先使用 PyMuPDF 擷取文字，必要時退回 pypdf。掃描圖片且沒有文字層的 PDF 不會自動 OCR。
 
 ### 前端資料與連線
 

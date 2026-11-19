@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import requests
 import os
 import time
@@ -8,8 +9,8 @@ import uuid
 import tempfile
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
-import PyPDF2
-import fitz  # PyMuPDF：對中文 (CJK) PDF 的文字擷取比 PyPDF2 更完整
+from pypdf import PdfReader
+import fitz  # PyMuPDF：對中文 (CJK) PDF 的文字擷取比 pypdf 更完整
 import docx
 
 # 載入 .env 文件中的環境變數
@@ -27,13 +28,13 @@ CORS(app, origins=["http://localhost:3000"], supports_credentials=True)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("未設定 GEMINI_API_KEY 環境變數。請在 .env 中設定。")
-genai.configure(api_key=GEMINI_API_KEY)
+genai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # 列出可用模型 (用於調試，同時建立可供前端選擇的模型清單)
 print("可用的 Gemini 模型:")
 _all_available_models = []
-for m in genai.list_models():
-    if 'generateContent' in m.supported_generation_methods:
+for m in genai_client.models.list():
+    if 'generateContent' in (m.supported_actions or []):
         # genai 回傳的名稱格式為 "models/xxx"，去除前綴方便前端顯示與使用
         model_name = m.name.split('/', 1)[-1]
         _all_available_models.append(model_name)
@@ -87,17 +88,8 @@ def is_ollama_model(model_name):
     """判斷模型名稱是否為 Ollama 模型。"""
     return isinstance(model_name, str) and model_name.startswith(OLLAMA_PREFIX)
 
-# 依模型名稱快取 Gemini GenerativeModel 實例，避免重複建立。
-_model_cache = {}
-
-def get_gemini_model(model_name):
-    """取得 (或建立) 指定名稱的 Gemini GenerativeModel 實例。"""
-    if model_name not in _model_cache:
-        _model_cache[model_name] = genai.GenerativeModel(
-            model_name,
-            system_instruction=system_instruction
-        )
-    return _model_cache[model_name]
+# 所有 Gemini 呼叫共用同一份設定 (系統提示詞)。
+_gemini_config = types.GenerateContentConfig(system_instruction=system_instruction)
 
 def resolve_model_name(model_name):
     """驗證模型名稱，無效時退回預設模型。"""
@@ -110,30 +102,36 @@ def resolve_model_name(model_name):
 
 def call_gemini(model_name, history, user_message):
     """以 Gemini 模型產生回應。history 不含本次的 user_message。"""
-    gemini_model = get_gemini_model(model_name)
     # 轉換為 Gemini 格式 (assistant -> model, content -> parts)。
     gemini_history = [
-        {"role": "model" if turn["role"] == "assistant" else "user",
-         "parts": [turn["content"]]}
+        types.Content(
+            role="model" if turn["role"] == "assistant" else "user",
+            parts=[types.Part(text=turn["content"])],
+        )
         for turn in history
     ]
-    chat_session = gemini_model.start_chat(history=gemini_history)
+    chat_session = genai_client.chats.create(
+        model=model_name,
+        config=_gemini_config,
+        history=gemini_history,
+    )
     response = chat_session.send_message(user_message)
-    try:
+    # 新版 SDK 沒有文字時 response.text 會回傳 None (不再拋出例外)。
+    if response.text:
         return response.text
-    except ValueError:
-        if not response.candidates:
-            block_reason_name = response.prompt_feedback.block_reason.name if response.prompt_feedback.block_reason else "UNKNOWN"
-            print(f"警告: 提示被封鎖，沒有收到候選回應。原因: {block_reason_name}")
-            return f"您的請求無法處理，原因：{block_reason_name}。請修改後再試一次。"
-        candidate = response.candidates[0]
-        finish_reason_name = candidate.finish_reason.name
-        print(f"警告: 模型回應沒有文字內容。結束原因: {finish_reason_name}")
-        if finish_reason_name == 'SAFETY':
-            return "因為安全考量，模型無法提供回應。請嘗試修改您的問題。"
-        elif finish_reason_name == 'STOP' and not candidate.content.parts:
-            return "我收到了您的訊息，但這次沒有特別的回應。您可以試著問我一些具體的問題嗎？"
-        return f"模型沒有生成文字回應，原因為「{finish_reason_name}」。請嘗試不同的問題。"
+    if not response.candidates:
+        feedback = response.prompt_feedback
+        block_reason_name = feedback.block_reason.name if feedback and feedback.block_reason else "UNKNOWN"
+        print(f"警告: 提示被封鎖，沒有收到候選回應。原因: {block_reason_name}")
+        return f"您的請求無法處理，原因：{block_reason_name}。請修改後再試一次。"
+    candidate = response.candidates[0]
+    finish_reason_name = candidate.finish_reason.name if candidate.finish_reason else "UNKNOWN"
+    print(f"警告: 模型回應沒有文字內容。結束原因: {finish_reason_name}")
+    if finish_reason_name == 'SAFETY':
+        return "因為安全考量，模型無法提供回應。請嘗試修改您的問題。"
+    elif finish_reason_name == 'STOP':
+        return "我收到了您的訊息，但這次沒有特別的回應。您可以試著問我一些具體的問題嗎？"
+    return f"模型沒有生成文字回應，原因為「{finish_reason_name}」。請嘗試不同的問題。"
 
 # Ollama 預設的上下文長度 (num_ctx) 很小 (常為 2048/4096 tokens)，
 # 上傳較長文件時，文件內容會因超出上下文而被截斷 (從開頭捨棄)，
@@ -221,12 +219,12 @@ def extract_text_from_file(file_path, filename):
                     for page in pdf_doc:
                         text += page.get_text()
             except Exception as e:
-                print(f"PyMuPDF 擷取失敗，改用 PyPDF2: {e}")
+                print(f"PyMuPDF 擷取失敗，改用 pypdf: {e}")
                 text = ""
-            # 若 PyMuPDF 擷取結果為空 (例如掃描檔)，退回 PyPDF2 再試一次。
+            # 若 PyMuPDF 擷取結果為空 (例如掃描檔)，退回 pypdf 再試一次。
             if not text.strip():
                 with open(file_path, 'rb') as file:
-                    pdf_reader = PyPDF2.PdfReader(file)
+                    pdf_reader = PdfReader(file)
                     for page in pdf_reader.pages:
                         text += page.extract_text() or ""
 
