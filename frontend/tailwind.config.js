@@ -3,7 +3,7 @@ module.exports = {
   darkMode: 'class', // 啟用 class-based dark mode
   content: [
     "./src/**/*.{js,jsx,ts,tsx}",
-    "./public/index.html"
+    "./index.html"
   ],
   theme: {
     extend: {

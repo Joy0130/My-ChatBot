@@ -26,8 +26,8 @@ Python Flask 後端
 
 | 技術 | 用途 |
 |---|---|
-| React 19、JavaScript、JSX | 建立聊天介面及互動功能。React Hooks 用來管理訊息、對話、載入狀態、模型選擇與主題。主要邏輯位於 `frontend/src/App.js`。 |
-| Create React App、react-scripts | 啟動前端開發伺服器、執行測試及打包前端資源。 |
+| React 19、JavaScript、JSX | 建立聊天介面及互動功能。React Hooks 用來管理訊息、對話、載入狀態、模型選擇與主題。主要邏輯位於 `frontend/src/App.jsx`。 |
+| Vite、Vitest | Vite 啟動前端開發伺服器並打包前端資源；Vitest 執行測試。 |
 | Tailwind CSS、PostCSS、Autoprefixer | 提供樣式工具類別，並處理 CSS。專案也使用 `App.css` 和 `index.css` 撰寫自訂樣式、動畫與響應式版面。 |
 | lucide-react | 提供聊天介面使用的圖示。 |
 | react-syntax-highlighter、Prism | 對 AI 回覆中的程式碼區塊提供語法高亮。 |
@@ -238,7 +238,7 @@ My-ChatBot/
 └── frontend/
     ├── package.json        # 前端相依套件及指令
     └── src/
-        ├── App.js          # React 聊天介面與主要邏輯
+        ├── App.jsx         # React 聊天介面與主要邏輯
         ├── App.css         # 應用程式樣式
         └── index.css       # 全域樣式
 ```
